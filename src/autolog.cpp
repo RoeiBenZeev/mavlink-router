@@ -22,10 +22,10 @@
 #include "binlog.h"
 #include "ulog.h"
 
-int AutoLog::write_msg(const struct buffer *buffer)
+int AutoLog::write_msg(const struct buffer *buffer, bool)
 {
     if (_logger != nullptr) {
-        return _logger->write_msg(buffer);
+        return _logger->write_msg(buffer, false);
     }
 
     /* set the expected system id to the first autopilot that we get a heartbeat from */

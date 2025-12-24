@@ -34,7 +34,7 @@ public:
 
     bool logging_start_timeout();
 
-    int write_msg(const struct buffer *buffer) override;
+    int write_msg(const struct buffer *buffer, bool use_explicit_route = false) override;
     int flush_pending_msgs() override { return -ENOSYS; }
 
 protected:

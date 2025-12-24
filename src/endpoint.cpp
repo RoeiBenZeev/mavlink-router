@@ -244,7 +244,7 @@ int Endpoint::handle_read()
             }
         } else {
             _add_sys_comp_id(buf.curr.src_sysid, buf.curr.src_compid);
-            Mainloop::get_instance().route_msg(&buf);
+            Mainloop::get_instance().route_msg(&buf, _name);
         }
     }
 
@@ -995,7 +995,7 @@ ssize_t UartEndpoint::_read_msg(uint8_t *buf, size_t len)
     return r;
 }
 
-int UartEndpoint::write_msg(const struct buffer *pbuf)
+int UartEndpoint::write_msg(const struct buffer *pbuf, bool use_explicit_route)
 {
     if (fd < 0) {
         log_error("UART %s: Trying to write invalid fd", _name.c_str());
@@ -1226,6 +1226,7 @@ bool UdpEndpoint::open(const char *ip, unsigned long port, UdpEndpointConfig::Mo
     const int broadcast_val = 1;
 
     this->is_ipv6 = ip_str_is_ipv6(ip);
+    this->_mode = mode;
 
     // setup the special IPv6/IPv4 part
     if (this->is_ipv6) {
@@ -1323,7 +1324,7 @@ ssize_t UdpEndpoint::_read_msg(uint8_t *buf, size_t len)
     return r;
 }
 
-int UdpEndpoint::write_msg(const struct buffer *pbuf)
+int UdpEndpoint::write_msg(const struct buffer *pbuf, bool use_explicit_route)
 {
     struct sockaddr *sock;
     socklen_t addrlen;
@@ -1339,18 +1340,49 @@ int UdpEndpoint::write_msg(const struct buffer *pbuf)
     }
 
     bool sock_connected = false;
-    if (this->is_ipv6) {
-        addrlen = sizeof(sockaddr6);
-        sock = (struct sockaddr *)&sockaddr6;
-        sock_connected = sockaddr6.sin6_port != 0;
-    } else {
-        addrlen = sizeof(sockaddr);
-        sock = (struct sockaddr *)&sockaddr;
-        sock_connected = sockaddr.sin_port != 0;
+    bool use_configured_address = false;
+
+    // For client mode with explicit route, use configured address instead of learned address
+    if (use_explicit_route && _mode == UdpEndpointConfig::Mode::Client) {
+        // Use configured address for client mode when explicit route exists
+        if (this->is_ipv6) {
+            if (config_sock.v6.sin6_port != 0) {
+                use_configured_address = true;
+                addrlen = sizeof(config_sock.v6);
+                sock = (struct sockaddr *)&config_sock.v6;
+                sock_connected = true;
+                log_trace("UDP %s: Using configured address (explicit route)", _name.c_str());
+            }
+        } else {
+            if (config_sock.v4.sin_port != 0) {
+                use_configured_address = true;
+                addrlen = sizeof(config_sock.v4);
+                sock = (struct sockaddr *)&config_sock.v4;
+                sock_connected = true;
+                log_trace("UDP %s: Using configured address (explicit route)", _name.c_str());
+            }
+        }
+    }
+
+    if (!use_configured_address) {
+        // Use learned address (existing behavior)
+        if (this->is_ipv6) {
+            addrlen = sizeof(sockaddr6);
+            sock = (struct sockaddr *)&sockaddr6;
+            sock_connected = sockaddr6.sin6_port != 0;
+        } else {
+            addrlen = sizeof(sockaddr);
+            sock = (struct sockaddr *)&sockaddr;
+            sock_connected = sockaddr.sin_port != 0;
+        }
     }
 
     if (!sock_connected) {
-        log_trace("UDP %s: No one ever connected to us. No one to write for", _name.c_str());
+        if (use_explicit_route) {
+            log_trace("UDP %s: Explicit route configured but no valid address", _name.c_str());
+        } else {
+            log_trace("UDP %s: No one ever connected to us. No one to write for", _name.c_str());
+        }
         return 0;
     }
 
@@ -1385,23 +1417,20 @@ int UdpEndpoint::parse_udp_mode(const char *val, size_t val_len, void *storage, 
     assert(storage);
     assert(val_len);
 
-    if (storage_len < sizeof(bool)) {
+    if (storage_len < sizeof(UdpEndpointConfig::Mode)) {
         return -ENOBUFS;
     }
-    if (val_len > INT_MAX) {
-        return -EINVAL;
-    }
 
-    auto *udp_mode = (UdpEndpointConfig::Mode *)storage;
-    if (memcaseeq(val, val_len, "normal", sizeof("normal") - 1)) {
-        *udp_mode = UdpEndpointConfig::Mode::Client;
-    } else if (memcaseeq(val, val_len, "eavesdropping", sizeof("eavesdropping") - 1)) {
-        log_warning("Eavesdropping mode is deprecated and rather act like udpin/server");
-        *udp_mode = UdpEndpointConfig::Mode::Server;
-    } else if (memcaseeq(val, val_len, "server", sizeof("server") - 1)) {
-        *udp_mode = UdpEndpointConfig::Mode::Server;
+    const char *mode_str = strndupa(val, val_len);
+    auto *mode = (UdpEndpointConfig::Mode *)storage;
+
+    if (strcaseeq(mode_str, "server")) {
+        *mode = UdpEndpointConfig::Mode::Server;
+    } else if (strcaseeq(mode_str, "client") || strcaseeq(mode_str, "normal")) {
+        // "Normal" is an alias for "Client" mode
+        *mode = UdpEndpointConfig::Mode::Client;
     } else {
-        log_error("Unknown 'mode' key: %.*s", (int)val_len, val);
+        log_error("Invalid UDP mode: %s (valid: server, client, normal)", mode_str);
         return -EINVAL;
     }
 
@@ -1682,7 +1711,7 @@ ssize_t TcpEndpoint::_read_msg(uint8_t *buf, size_t len)
     return r;
 }
 
-int TcpEndpoint::write_msg(const struct buffer *pbuf)
+int TcpEndpoint::write_msg(const struct buffer *pbuf, bool use_explicit_route)
 {
     struct sockaddr *sock;
     socklen_t addrlen;

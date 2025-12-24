@@ -82,7 +82,7 @@ void BinLog::_send_stop()
     _send_msg(&msg, _target_system_id);
 }
 
-int BinLog::write_msg(const struct buffer *buffer)
+int BinLog::write_msg(const struct buffer *buffer, bool)
 {
     const bool mavlink2 = buffer->data[0] == MAVLINK_STX;
     uint8_t trimmed_zeros;

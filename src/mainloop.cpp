@@ -140,9 +140,24 @@ int Mainloop::remove_fd(int fd) const
     return 0;
 }
 
-int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf) const
+bool Mainloop::has_explicit_route_to(const std::string &from_endpoint, const std::string &to_endpoint) const
 {
-    int r = e->write_msg(buf);
+    auto route_it = _explicit_routes.find(from_endpoint);
+    if (route_it != _explicit_routes.end()) {
+        return route_it->second.find(to_endpoint) != route_it->second.end();
+    }
+    return false;
+}
+
+int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf, const std::string &source_endpoint_name) const
+{
+    // Check if there's an explicit route from source to this endpoint
+    bool use_explicit_route = false;
+    if (!source_endpoint_name.empty() && has_explicit_route_to(source_endpoint_name, e->get_name())) {
+        use_explicit_route = true;
+    }
+
+    int r = e->write_msg(buf, use_explicit_route);
 
     /*
      * If endpoint would block, add EPOLLOUT event to get notified when it's
@@ -155,30 +170,49 @@ int Mainloop::write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer 
     return r;
 }
 
-void Mainloop::route_msg(struct buffer *buf)
+void Mainloop::route_msg(struct buffer *buf, const std::string &source_endpoint_name)
 {
     bool unknown = true;
 
     for (const auto &e : this->g_endpoints) {
         auto acceptState = e->accept_msg(buf);
 
+        // Check explicit routes: if there's a route from source to this endpoint, force accept
+        bool explicit_route = false;
+        if (!source_endpoint_name.empty() && !_explicit_routes.empty()) {
+            auto route_it = _explicit_routes.find(source_endpoint_name);
+            if (route_it != _explicit_routes.end()) {
+                if (route_it->second.find(e->get_name()) != route_it->second.end()) {
+                    explicit_route = true;
+                    if (acceptState == Endpoint::AcceptState::Rejected) {
+                        acceptState = Endpoint::AcceptState::Accepted;
+                        log_trace("Endpoint [%d]%s: Explicit route from %s, forcing accept",
+                                  e->fd, e->get_name().c_str(), source_endpoint_name.c_str());
+                    }
+                }
+            }
+        }
+
         switch (acceptState) {
         case Endpoint::AcceptState::Accepted:
-            log_trace("Endpoint [%d] accepted message %u to %d/%d from %u/%u",
+            log_trace("Endpoint [%d]%s accepted message %u to %d/%d from %u/%u%s",
                       e->fd,
+                      e->get_name().c_str(),
                       buf->curr.msg_id,
                       buf->curr.target_sysid,
                       buf->curr.target_compid,
                       buf->curr.src_sysid,
-                      buf->curr.src_compid);
-            if (write_msg(e, buf) == -EPIPE) { // only TCP endpoints should return -EPIPE
+                      buf->curr.src_compid,
+                      explicit_route ? " (explicit route)" : "");
+            if (write_msg(e, buf, source_endpoint_name) == -EPIPE) { // only TCP endpoints should return -EPIPE
                 should_process_tcp_hangups = true;
             }
             unknown = false;
             break;
         case Endpoint::AcceptState::Filtered:
-            log_trace("Endpoint [%d] filtered out message %u to %d/%d from %u/%u",
+            log_trace("Endpoint [%d]%s filtered out message %u to %d/%d from %u/%u",
                       e->fd,
+                      e->get_name().c_str(),
                       buf->curr.msg_id,
                       buf->curr.target_sysid,
                       buf->curr.target_compid,
@@ -400,6 +434,13 @@ bool Mainloop::add_endpoints(const Configuration &config)
         }
 
         g_endpoints.emplace_back(tcp);
+    }
+
+    // Build explicit routes map
+    _explicit_routes.clear();
+    for (const auto &route : config.route_configs) {
+        _explicit_routes[route.from_endpoint].insert(route.to_endpoint);
+        log_info("Explicit route: %s -> %s", route.from_endpoint.c_str(), route.to_endpoint.c_str());
     }
 
     // Link grouped endpoints together

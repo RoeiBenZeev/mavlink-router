@@ -100,7 +100,7 @@ void ULog::stop()
     LogEndpoint::stop();
 }
 
-int ULog::write_msg(const struct buffer *buffer)
+int ULog::write_msg(const struct buffer *buffer, bool)
 {
     const bool mavlink2 = buffer->data[0] == MAVLINK_STX;
     uint8_t trimmed_zeros;

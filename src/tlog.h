@@ -31,7 +31,7 @@ public:
     bool start() override;
     void stop() override;
 
-    int write_msg(const struct buffer *pbuf) override;
+    int write_msg(const struct buffer *pbuf, bool use_explicit_route = false) override;
     int flush_pending_msgs() override { return -ENOSYS; }
 
 protected:

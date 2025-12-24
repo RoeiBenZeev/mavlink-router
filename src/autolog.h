@@ -29,7 +29,7 @@ public:
     {
     }
 
-    int write_msg(const struct buffer *buffer) override;
+    int write_msg(const struct buffer *buffer, bool use_explicit_route = false) override;
     int flush_pending_msgs() override { return -ENOSYS; }
 
     bool start() override;

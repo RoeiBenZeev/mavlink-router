@@ -161,7 +161,7 @@ public:
     bool handle_canwrite() override;
 
     virtual void print_statistics();
-    virtual int write_msg(const struct buffer *pbuf) = 0;
+    virtual int write_msg(const struct buffer *pbuf, bool use_explicit_route = false) = 0;
     virtual int flush_pending_msgs() = 0;
 
     void log_aggregate(unsigned int interval_sec);
@@ -234,6 +234,7 @@ public:
     void link_group_member(std::shared_ptr<Endpoint> other);
 
     std::string get_type() const { return this->_type; }
+    std::string get_name() const { return this->_name; }
     std::string get_group_name() const { return this->_group_name; };
 
     struct buffer rx_buf;
@@ -296,7 +297,7 @@ public:
     UartEndpoint(std::string name);
     ~UartEndpoint() override = default;
 
-    int write_msg(const struct buffer *pbuf) override;
+    int write_msg(const struct buffer *pbuf, bool use_explicit_route = false) override;
     int flush_pending_msgs() override { return -ENOSYS; }
 
     bool setup(UartEndpointConfig config); ///< open UART device and apply config
@@ -327,7 +328,7 @@ public:
     UdpEndpoint(std::string name);
     ~UdpEndpoint() override;
 
-    int write_msg(const struct buffer *pbuf) override;
+    int write_msg(const struct buffer *pbuf, bool use_explicit_route = false) override;
     int flush_pending_msgs() override { return -ENOSYS; }
 
     bool setup(UdpEndpointConfig config); ///< open socket and apply config
@@ -355,6 +356,7 @@ protected:
 
 private:
     bool is_ipv6;
+    UdpEndpointConfig::Mode _mode = UdpEndpointConfig::Mode::Undefined;
     struct sockaddr_in sockaddr;
     struct sockaddr_in6 sockaddr6;
 };
@@ -364,7 +366,7 @@ public:
     TcpEndpoint(std::string name);
     ~TcpEndpoint() override;
 
-    int write_msg(const struct buffer *pbuf) override;
+    int write_msg(const struct buffer *pbuf, bool use_explicit_route = false) override;
     int flush_pending_msgs() override { return -ENOSYS; }
     bool is_valid() override { return _valid; };
     bool is_critical() override { return false; };

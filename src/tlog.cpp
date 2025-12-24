@@ -54,7 +54,7 @@ void TLog::stop()
     LogEndpoint::stop();
 }
 
-int TLog::write_msg(const struct buffer *buffer)
+int TLog::write_msg(const struct buffer *buffer, bool)
 {
     /* set the expected system id to the first autopilot that we get a heartbeat from */
     if (_target_system_id == -1 && buffer->curr.msg_id == MAVLINK_MSG_ID_HEARTBEAT

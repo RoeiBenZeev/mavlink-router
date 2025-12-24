@@ -515,6 +515,33 @@ static int parse_confs(ConfFile &conffile, Configuration &config)
         config.tcp_configs.push_back(opt_tcp);
     }
 
+    // Parse Route sections
+    iter = {};
+    const char *route_pattern = "route *";
+    offset = strlen(route_pattern) - 1;
+    while (conffile.get_sections(route_pattern, &iter) == 0) {
+        RouteConfig route{};
+        route.from_endpoint = std::string(iter.name + offset, iter.name_len - offset);
+
+        // Parse "To" option
+        static const ConfFile::OptionsTable route_option_table[] = {
+            {"To", true, ConfFile::parse_stdstring, OPTIONS_TABLE_STRUCT_FIELD(RouteConfig, to_endpoint)},
+            {}
+        };
+
+        ret = conffile.extract_options(&iter, route_option_table, &route);
+        if (ret != 0) {
+            return ret;
+        }
+
+        if (route.to_endpoint.empty()) {
+            log_error("Route section [%s] missing required 'To' option", iter.name);
+            return -EINVAL;
+        }
+
+        config.route_configs.push_back(route);
+    }
+
     return 0;
 }
 

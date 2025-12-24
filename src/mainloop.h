@@ -17,7 +17,9 @@
  */
 #pragma once
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -29,6 +31,11 @@
 #include "endpoint.h"
 #include "timeout.h"
 #include "ulog.h"
+
+struct RouteConfig {
+    std::string from_endpoint; ///< Source endpoint name
+    std::string to_endpoint;   ///< Target endpoint name
+};
 
 struct Configuration {
     std::string conf_file_name;        ///< CLI "conf-file" only!
@@ -43,6 +50,7 @@ struct Configuration {
     std::vector<UartEndpointConfig> uart_configs;
     std::vector<UdpEndpointConfig> udp_configs;
     std::vector<TcpEndpointConfig> tcp_configs;
+    std::vector<RouteConfig> route_configs; ///< Explicit routing rules
     unsigned long sniffer_sysid;
 };
 
@@ -58,9 +66,10 @@ public:
     int mod_fd(int fd, void *data, int events) const;
     int remove_fd(int fd) const;
     int loop();
-    void route_msg(struct buffer *buf);
+    void route_msg(struct buffer *buf, const std::string &source_endpoint_name = "");
     void handle_tcp_connection();
-    int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf) const;
+    int write_msg(const std::shared_ptr<Endpoint> &e, const struct buffer *buf, const std::string &source_endpoint_name = "") const;
+    bool has_explicit_route_to(const std::string &from_endpoint, const std::string &to_endpoint) const;
     void process_tcp_hangups();
     Timeout *add_timeout(uint32_t timeout_msec, std::function<bool(void *)> cb, const void *data);
     void del_timeout(Timeout *t);
@@ -113,6 +122,9 @@ private:
     std::vector<std::shared_ptr<Endpoint>> g_endpoints{};
     int g_tcp_fd = -1; ///< for TCP server
     std::shared_ptr<LogEndpoint> _log_endpoint{nullptr};
+
+    // Route mappings: from endpoint name -> set of target endpoint names
+    std::map<std::string, std::set<std::string>> _explicit_routes{};
 
     Timeout *_timeouts = nullptr;
 
